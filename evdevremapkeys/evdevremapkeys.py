@@ -46,6 +46,14 @@ async def handle_events(input, output, remappings, modifier_groups):
     try:
         while True:
             async for event in input.async_read_loop():
+                if event.code!=0 and event.code!=4:
+                    keycode = '???'
+                    try:
+                        categorized = evdev.categorize(event)
+                        keycode = categorized.keycode
+                    except:
+                        pass
+                    print("{}  {}".format(event,keycode))
                 if not active_group:
                     active_mappings = remappings
                 else:
@@ -86,10 +94,17 @@ def repeat_event(event, rate, count, values, output):
         yield from asyncio.sleep(rate)
 
 
+def remap_write(output, event):
+    output.write_event(event)
+    output.syn()
+    print("    SEND: {}".format(event))
+
+
 def remap_event(output, event, event_remapping):
     original_type = event.type
     original_value = event.value
     original_code = event.code
+    print("  REMAP {}".format(event_remapping))
     modifier = event_remapping[0].get('modifier', False)
     if modifier:
         if event.value != 1:
@@ -98,14 +113,12 @@ def remap_event(output, event, event_remapping):
             event.code = remapping['code']
             event.type = remapping.get('type', None) or original_type
             event.value = 1
-            output.write_event(event)
-            output.syn()
+            remap_write(output, event)
         for remapping in reversed(event_remapping):
             event.code = remapping['code']
             event.type = remapping.get('type', None) or original_type
             event.value = 0
-            output.write_event(event)
-            output.syn()
+            remap_write(output, event)
         return
 
     for remapping in event_remapping:
@@ -117,8 +130,7 @@ def remap_event(output, event, event_remapping):
         if not repeat and not delay:
             for value in values:
                 event.value = value
-                output.write_event(event)
-                output.syn()
+                remap_write(output, event)
         else:
             key_down = event.value == 1
             key_up = event.value == 0
@@ -136,8 +148,7 @@ def remap_event(output, event, event_remapping):
                         remapped_tasks[original_code] -= 1
 
                 if remapped_tasks[original_code] == count:
-                    output.write_event(event)
-                    output.syn()
+                    remap_write(output, event)
             elif repeat:
                 # count > 0  - ignore key-up events
                 # count is 0 - repeat until key-up occurs
