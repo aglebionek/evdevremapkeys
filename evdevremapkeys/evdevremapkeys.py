@@ -90,6 +90,24 @@ def remap_event(output, event, event_remapping):
     original_type = event.type
     original_value = event.value
     original_code = event.code
+    modifier = event_remapping[0].get('modifier', False)
+    if modifier:
+        if event.value != 1:
+            return
+        for remapping in event_remapping:
+            event.code = remapping['code']
+            event.type = remapping.get('type', None) or original_type
+            event.value = 1
+            output.write_event(event)
+            output.syn()
+        for remapping in reversed(event_remapping):
+            event.code = remapping['code']
+            event.type = remapping.get('type', None) or original_type
+            event.value = 0
+            output.write_event(event)
+            output.syn()
+        return
+
     for remapping in event_remapping:
         event.code = remapping['code']
         event.type = remapping.get('type', None) or original_type
