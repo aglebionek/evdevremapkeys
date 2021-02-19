@@ -30,6 +30,7 @@ import signal
 
 import evdev
 from evdev import ecodes, InputDevice, UInput
+from evdev.events import InputEvent
 import pyudev
 from xdg import BaseDirectory
 import yaml
@@ -46,14 +47,14 @@ async def handle_events(input, output, remappings, modifier_groups):
     try:
         while True:
             async for event in input.async_read_loop():
-                if event.code!=0 and event.code!=4:
+                if event.code != 0 and event.code != 4:
                     keycode = '???'
                     try:
                         categorized = evdev.categorize(event)
                         keycode = categorized.keycode
                     except:
                         pass
-                    print("{}  {}".format(event,keycode))
+                    print("{}  {}".format(event, keycode))
                 if not active_group:
                     active_mappings = remappings
                 else:
@@ -66,8 +67,29 @@ async def handle_events(input, output, remappings, modifier_groups):
                         active_group['name'] = \
                             active_mappings[event.code][0]['modifier_group']
                         active_group['code'] = event.code
+                        active_mappings = modifier_groups[active_group['name']]
+                        # if we press the modifier key but other keys are pressed
+                        if len(input.active_keys()) > 1:
+                            # this bit needs to happen so the non-modified key press doesn't happen indefinitely and doesn't block the modified action to happen
+                            release_event_on_modifier_key_press(input, output, event)
+                            # if we press the modifier while other key is pressed, we want the modified action to start happening instead
+                            event = InputEvent(event.sec, event.usec, type=1, code=input.active_keys()[0], value=1)
+                            remap_event(output, event, active_mappings[event.code])
                     elif event.value == 0:
-                        active_group = {}
+                        if len(input.active_keys()) == 0:
+                            active_group = {}
+                        else:
+                            # this bit needs to happen so the modified action doesn't happen idefinitely after modifier key release
+                            code = input.active_keys()[0]
+                            release_event_on_modifier_key_release(
+                                input, output, event, active_mappings)
+                            active_group = {}
+                            # if we release the modifier key but still hold a button, we need to send the unmodified button key press
+                            event = InputEvent(event.sec, event.usec,
+                                               type=1, code=code, value=1)
+                            output.write_event(event)
+                            output.syn()
+
                 else:
                     if event.code in active_mappings:
                         remap_event(output, event, active_mappings[event.code])
@@ -79,6 +101,22 @@ async def handle_events(input, output, remappings, modifier_groups):
         print('Unregistered: %s, %s, %s' % (input.name, input.path, input.phys),
               flush=True)
         raise e
+
+
+def release_event_on_modifier_key_release(input, output, event, active_mappings):
+    code = input.active_keys()[0]
+    event = InputEvent(sec=event.sec, usec=event.usec, type=1, code=code, value=0)
+    remap_event(output, event, active_mappings[event.code])
+
+
+def release_event_on_modifier_key_press(input, output, event):
+    for c in input.active_keys():
+        if c != event.code:
+            code = c
+            break
+    event = InputEvent(sec=event.sec, usec=event.usec, type=1, code=code, value=0)
+    output.write_event(event)
+    output.syn()
 
 
 @asyncio.coroutine
@@ -109,6 +147,7 @@ def remap_event(output, event, event_remapping):
     if modifier:
         if event.value != 1:
             return
+
         for remapping in event_remapping:
             event.code = remapping['code']
             event.type = remapping.get('type', None) or original_type
@@ -452,7 +491,7 @@ def main():
     args = parser.parse_args()
     if args.list_devices:
         print("\n".join(['%s:\t"%s" | "%s' %
-              (fn, phys, name) for (fn, phys, name) in list_devices()]))
+                         (fn, phys, name) for (fn, phys, name) in list_devices()]))
     elif args.read_events:
         read_events(args.read_events)
     else:

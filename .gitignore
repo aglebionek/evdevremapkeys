@@ -1,3 +1,9 @@
+# TOREMOVE
+.vscode
+my_tests.py
+build-bin.sh
+*.code-workspace
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
